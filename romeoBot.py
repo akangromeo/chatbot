@@ -1,6 +1,8 @@
 import os
 import telebot
 import MySQLdb
+import threading
+import queue
 from telebot import types
 from datetime import datetime
 from dotenv import load_dotenv
@@ -15,6 +17,8 @@ user_state = {}
 STATE_DEFAULT = 0
 STATE_CARI_MHS = 1
 STATE_CARI_MATKUL = 2
+
+message_queue = queue.Queue()
 
 def connect_db():
     return MySQLdb.connect(host="127.0.0.1", user="root", password="", database="db_romeoBot", port=3306)
@@ -49,6 +53,23 @@ def get_matkul_by_name(matkul_name):
     conn.close()
     return matkul
 
+def worker():
+    while True:
+        try:
+            chat_id, message_handler, message = message_queue.get()
+            if message_handler == process_nim_input:
+                process_nim_input(message)
+            elif message_handler == process_matkul_name_input:
+                process_matkul_name_input(message)
+            else:
+                bot.send_message(chat_id, "Unknown message handler.")
+            message_queue.task_done()
+        except Exception as e:
+            print(f"Error processing message: {e}")
+
+worker_thread = threading.Thread(target=worker, daemon=True)
+worker_thread.start()
+
 @bot.message_handler(commands=['cari_mhs'])
 def cari_mahasiswa(m):
     answer = "Masukkan NIM mahasiswa yang ingin Anda cari:"
@@ -58,7 +79,7 @@ def cari_mahasiswa(m):
     date = datetime.now()
     inbox(username, message, date)
     outbox(username, answer, date)
-    bot.register_next_step_handler(m, process_nim_input)
+    message_queue.put((m.chat.id, process_nim_input, m))
 
 def process_nim_input(m):
     nim = m.text
@@ -79,7 +100,7 @@ def cari_matkul(m):
     date = datetime.now()
     inbox(username, message, date)
     outbox(username, answer, date)
-    bot.register_next_step_handler(m, process_matkul_name_input)
+    message_queue.put((m.chat.id, process_matkul_name_input, m))
 
 def process_matkul_name_input(m):
     matkul_name = m.text
@@ -88,11 +109,9 @@ def process_matkul_name_input(m):
         info_matkul = "\n".join([f"ID Matkul: {matkul[0]}\nNama Matkul: {matkul[1]}" for matkul in mata_kuliah])
         bot.send_message(m.chat.id, info_matkul)
         user_state[m.chat.id] = STATE_DEFAULT
-
     else:
         bot.send_message(m.chat.id, "Maaf, mata kuliah dengan nama tersebut tidak ditemukan.")
 
-#start
 @bot.message_handler(commands=['start', 'hello'])
 def start(m):
     answer ="Hello, my name is romeo, im Raden Dean Diningrat's Bot. u wanna see smth? if u want, type /show_menu"
@@ -103,7 +122,6 @@ def start(m):
     inbox(username, message, date)
     outbox(username, answer, date)
 
-# show menu
 @bot.message_handler(commands=['show_menu'])
 def handle_show_menu(m):
     user_state[m.chat.id] = STATE_DEFAULT
@@ -111,6 +129,9 @@ def handle_show_menu(m):
 
 @bot.message_handler(func=lambda message: True)
 def handle_menu(m):
+
+    date = datetime.now()
+
     if m.chat.id not in user_state:
         user_state[m.chat.id] = STATE_DEFAULT
 
@@ -120,9 +141,11 @@ def handle_menu(m):
         if data is not None:
             bot.send_message(m.chat.id, data)
     elif user_state[m.chat.id] == STATE_CARI_MHS:
-        process_nim_input(m)
+        message_queue.put((m.chat.id, process_nim_input, m))
+        outbox(m.chat.id, , date)
     elif user_state[m.chat.id] == STATE_CARI_MATKUL:
-        process_matkul_name_input(m)
+        message_queue.put((m.chat.id, process_matkul_name_input, m))
+        outbox(m.chat.id, , date)
 
 def show_menu(m):
     options = get_menu_options()
