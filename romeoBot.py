@@ -4,11 +4,17 @@ import MySQLdb
 from telebot import types
 from datetime import datetime
 from dotenv import load_dotenv
-import time
 
 load_dotenv()
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
+
+user_state = {}
+
+# Define states
+STATE_DEFAULT = 0
+STATE_CARI_MHS = 1
+STATE_CARI_MATKUL = 2
 
 def connect_db():
     return MySQLdb.connect(host="127.0.0.1", user="root", password="", database="db_romeoBot", port=3306)
@@ -60,6 +66,7 @@ def process_nim_input(m):
     if mahasiswa:
         info_mahasiswa = f"NIM: {mahasiswa[0]}\nNama: {mahasiswa[1]}\nJurusan: {mahasiswa[2]}"
         bot.send_message(m.chat.id, info_mahasiswa)
+        user_state[m.chat.id] = STATE_DEFAULT
     else:
         bot.send_message(m.chat.id, "Maaf, mahasiswa dengan NIM tersebut tidak ditemukan.")
 
@@ -80,9 +87,12 @@ def process_matkul_name_input(m):
     if mata_kuliah:
         info_matkul = "\n".join([f"ID Matkul: {matkul[0]}\nNama Matkul: {matkul[1]}" for matkul in mata_kuliah])
         bot.send_message(m.chat.id, info_matkul)
+        user_state[m.chat.id] = STATE_DEFAULT
+
     else:
         bot.send_message(m.chat.id, "Maaf, mata kuliah dengan nama tersebut tidak ditemukan.")
 
+#start
 @bot.message_handler(commands=['start', 'hello'])
 def start(m):
     answer ="Hello, my name is romeo, im Raden Dean Diningrat's Bot. u wanna see smth? if u want, type /show_menu"
@@ -93,16 +103,26 @@ def start(m):
     inbox(username, message, date)
     outbox(username, answer, date)
 
+# show menu
 @bot.message_handler(commands=['show_menu'])
 def handle_show_menu(m):
+    user_state[m.chat.id] = STATE_DEFAULT
     show_menu(m)
 
 @bot.message_handler(func=lambda message: True)
 def handle_menu(m):
-    option = m.text
-    data = get_data_from_database(option, m)
-    if data is not None:
-        bot.send_message(m.chat.id, data)
+    if m.chat.id not in user_state:
+        user_state[m.chat.id] = STATE_DEFAULT
+
+    if user_state[m.chat.id] == STATE_DEFAULT:
+        option = m.text
+        data = get_data_from_database(option, m)
+        if data is not None:
+            bot.send_message(m.chat.id, data)
+    elif user_state[m.chat.id] == STATE_CARI_MHS:
+        process_nim_input(m)
+    elif user_state[m.chat.id] == STATE_CARI_MATKUL:
+        process_matkul_name_input(m)
 
 def show_menu(m):
     options = get_menu_options()
@@ -117,7 +137,6 @@ def show_menu(m):
     inbox(username, message, date)
     outbox(username, "Show menu", date)
 
-
 def get_menu_options():
     conn = connect_db()
     cursor = conn.cursor()
@@ -128,14 +147,12 @@ def get_menu_options():
 
 def get_data_from_database(option, m):
     if option == "cari_mhs":
-        cari_mahasiswa(m)
-        return None
+        user_state[m.chat.id] = STATE_CARI_MHS
+        return "Enter the student's NIM:"
     elif option == "cari_matkul":
-        cari_matkul(m)
-        return None
+        user_state[m.chat.id] = STATE_CARI_MATKUL
+        return "Enter the name of the course you want to search:"
     else:
-        return "Maaf, perintah tidak dikenali."
-
-
+        return "Sorry, the command is not recognized."
 
 bot.polling()
